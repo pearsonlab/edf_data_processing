@@ -14,6 +14,7 @@ import tempfile
 import json
 import math
 from math import floor
+from datetime import date
 
 class Progress(object):
     def __init__(self, filename):
@@ -125,7 +126,7 @@ def local_writer(edf, header, local, s3):
                 sec += 60*(mnt%1)
                 mnt += sec//60
                 sec = sec%60
-
+                file_head['start_date'] = header['start_date']
                 file_head['start_time'] = (floor(hr), floor(mnt), sec)
                 file_head['sigLabel'] = header['sigLabels'][j]
                 file_head['sampsPerRecord'] = header['numSamps'][j]
@@ -175,11 +176,19 @@ def s3_writer(edf, header, local, s3):
     finally:
         shutil.rmtree(tmp_dir)
 
-def head_parser(thisFile, chunk_size, file_size):
+def head_parser(thisFile, chunk_size, file_size, patientID, day):
     header = {}
     header['filename'] = thisFile.name.split('/')[-1]
     # extract info from header
-    thisFile.read(176)
+    thisFile.read(168)
+    file_given_date = tuple(int(i) for i in thisFile.read(8).decode("utf-8").strip().split('.')) # makes tuple for day, month, year 
+    file_start_date = file_given_date[::-1] # getting the date in year, month, day format
+    file_date = date(file_start_date[0], file_start_date[1], file_start_date[2]) # getting the date in python date format
+    
+    surgery_date = date(file_start_date[0], file_start_date[1], day)
+    day_index = (file_date-surgery_date).days # getting the day index for the date to be stored in datebase
+    
+    header['start_date'] = (patientID, 1, day_index)
     header['start_time'] = tuple(int(i) for i in thisFile.read(8).decode("utf-8").strip().split('.'))  # makes tup of hour, minute, second
     header['head_length'] = int(thisFile.read(8).decode("utf-8").strip())
     thisFile.read(44)
@@ -236,17 +245,21 @@ if __name__ == '__main__':
     parser.add_argument('--local', help='Location to store folder of binary files (One for each chunk per signal) on the local machine.')
     parser.add_argument('--s3', help='URI formatted location to store binary folder on S3.  Only works if you have AWS ' +
                                     'credentials stored as environment variables.')
+    parser.add_argument('--subject', help='patient ID in terms of year. eg: 2002')
+    parser.add_argument('--day', help='day of the surgery. eg: 12')
     parser.add_argument('--chunk', help='Chunk size (in number of records) to break recordings by', default=60)
     args = parser.parse_args()
 
     edf_file = args.edfloc
     local_loc = args.local
     s3_loc = args.s3
+    patientID = int(args.subject)
+    day = int(args.day)
     chunk_size = int(args.chunk) #to number of records
 
     # set up file writer
-    if not s3_loc and not local_loc:
-        sys.exit('Must provide an output location (either local (--local), S3 (--s3), or both).')
+    if not s3_loc and not local_loc and not patientID and not day:
+        sys.exit('Must provide an output location (either local (--local), S3 (--s3), or both) as well as patientID and day.')
     elif s3_loc and local_loc:
         writer = local_and_s3_writer
     elif s3_loc:  # only local directory provided
@@ -260,7 +273,7 @@ if __name__ == '__main__':
     # reads an edf file and splits the signals into a folder of binary files (one for each signal)
     with open(edf_file, 'rb') as thisFile: # open edf file as read-binary
         # parse header
-        header = head_parser(thisFile, chunk_size, file_size)
+        header = head_parser(thisFile, chunk_size, file_size, patientID, day)
 
         # write to binary files
         writer(thisFile, header, local_loc, s3_loc)
