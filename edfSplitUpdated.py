@@ -197,7 +197,7 @@ def head_parser(thisFile, chunk_size, file_size, patientID, day):
     header['numSigs'] = int(thisFile.read(4).decode("utf-8").strip())
     header['sigLabels'] = []
     for i in range(header['numSigs']):
-        header['sigLabels'].append(thisFile.read(16).decode("utf-8").strip())
+        header['sigLabels'].append(thisFile.read(16).decode("utf-8").strip().split("/")[-1])
     thisFile.read(header['numSigs']*(80))
     
     header['phyDimension'] = []
